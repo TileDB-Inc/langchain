@@ -6,7 +6,6 @@ import random
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import numpy as np
-import tiledb
 
 from langchain.docstore.document import Document
 from langchain.embeddings.base import Embeddings
@@ -25,13 +24,14 @@ def dependable_tiledb_import() -> Any:
     """Import tiledb-vector-search if available, otherwise raise error."""
     try:
         import tiledb.vector_search as tiledb_vs
+        import tiledb as tiledb
     except ImportError:
         raise ValueError(
             "Could not import tiledb-vector-search python package. "
             "Please install it with `conda install -c tiledb tiledb-vector-search` "
             "or `pip install tiledb-vector-search`"
         )
-    return tiledb_vs
+    return tiledb_vs, tiledb
 
 
 class TileDB(VectorStore):
@@ -87,6 +87,7 @@ class TileDB(VectorStore):
         Returns:
             List of Documents and scores.
         """
+        tiledb_vs, tiledb = dependable_tiledb_import()
         docs = []
         docs_array = tiledb.open(self.docs_array_uri, "r")
         for idx, score in zip(ids, scores):
@@ -377,7 +378,7 @@ class TileDB(VectorStore):
                     f"Expected one of {list(INDEX_METRICS)}"
                 )
             )
-        tiledb_vs = dependable_tiledb_import()
+        tiledb_vs, tiledb = dependable_tiledb_import()
         if not embeddings:
             raise ValueError("embeddings must be provided to build a TileDB index")
 
@@ -476,6 +477,7 @@ class TileDB(VectorStore):
         Returns:
             List of ids from adding the texts into the vectorstore.
         """
+        tiledb_vs, tiledb = dependable_tiledb_import()
         embeddings = self.embedding.embed_documents(list(texts))
         if ids is None:
             ids = [str(random.randint(0, MAX_UINT64 - 1)) for _ in texts]
@@ -584,7 +586,7 @@ class TileDB(VectorStore):
             array_uri: The URI of the TileDB array.
             embeddings: Embeddings to use when generating queries.
         """
-        tiledb_vs = dependable_tiledb_import()
+        tiledb_vs, tiledb = dependable_tiledb_import()
 
         group = tiledb.Group(array_uri)
         vector_array_uri = group[VECTOR_ARRAY_NAME].uri

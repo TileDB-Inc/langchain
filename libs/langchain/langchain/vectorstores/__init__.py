@@ -343,6 +343,12 @@ def _import_tencentvectordb() -> Any:
     return TencentVectorDB
 
 
+def _import_tiledb() -> Any:
+    from langchain.vectorstores.tiledb import TileDB
+
+    return TileDB
+
+
 def _import_tigris() -> Any:
     from langchain.vectorstores.tigris import Tigris
 
@@ -508,6 +514,8 @@ def __getattr__(name: str) -> Any:
         return _import_tair()
     elif name == "TencentVectorDB":
         return _import_tencentvectordb()
+    elif name == "TileDB":
+        return _import_tiledb()
     elif name == "Tigris":
         return _import_tigris()
     elif name == "TimescaleVector":
@@ -591,6 +599,7 @@ __all__ = [
     "StarRocks",
     "SupabaseVectorStore",
     "Tair",
+    "TileDB",
     "Tigris",
     "TimescaleVector",
     "Typesense",
