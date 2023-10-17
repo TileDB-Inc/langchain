@@ -8,8 +8,8 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 import numpy as np
 
 from langchain.docstore.document import Document
-from langchain.embeddings.base import Embeddings
-from langchain.vectorstores.base import VectorStore
+from langchain.schema.embeddings import Embeddings
+from langchain.schema.vectorstore import VectorStore
 from langchain.vectorstores.utils import maximal_marginal_relevance
 
 INDEX_METRICS = frozenset(["euclidean"])
@@ -23,8 +23,8 @@ MAX_FLOAT_32 = np.finfo(np.dtype("float32")).max
 def dependable_tiledb_import() -> Any:
     """Import tiledb-vector-search if available, otherwise raise error."""
     try:
-        import tiledb.vector_search as tiledb_vs
         import tiledb as tiledb
+        import tiledb.vector_search as tiledb_vs
     except ImportError:
         raise ValueError(
             "Could not import tiledb-vector-search python package. "
