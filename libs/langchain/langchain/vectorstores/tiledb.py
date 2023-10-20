@@ -116,7 +116,8 @@ class TileDB(VectorStore):
             scores: List of distances of the documents in the index.
             k: Number of Documents to return. Defaults to 4.
             filter (Optional[Dict[str, Any]]): Filter by metadata. Defaults to None.
-            score_threshold: Optional, a floating point value to filter the resulting set of retrieved docs
+            score_threshold: Optional, a floating point value to filter the
+                resulting set of retrieved docs
         Returns:
             List of Documents and scores.
         """
@@ -175,7 +176,8 @@ class TileDB(VectorStore):
                       Defaults to 20.
             **kwargs: kwargs to be passed to similarity search. Can include:
                 nprobe: Optional, number of partitions to check if using IVF_FLAT index
-                score_threshold: Optional, a floating point value to filter the resulting set of retrieved docs
+                score_threshold: Optional, a floating point value to filter the
+                    resulting set of retrieved docs
 
         Returns:
             List of documents most similar to the query text and distance
