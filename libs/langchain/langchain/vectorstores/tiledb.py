@@ -563,7 +563,9 @@ class TileDB(VectorStore):
         """
 
         external_ids = np.array(ids).astype(np.uint64)
-        self.vector_index.delete_batch(external_ids=external_ids, timestamp=timestamp if timestamp != 0 else None)
+        self.vector_index.delete_batch(
+            external_ids=external_ids, timestamp=timestamp if timestamp != 0 else None
+        )
         return True
 
     def add_texts(
@@ -596,7 +598,9 @@ class TileDB(VectorStore):
         for i in range(len(embeddings)):
             vectors[i] = np.array(embeddings[i], dtype=np.float32)
         self.vector_index.update_batch(
-            vectors=vectors, external_ids=external_ids, timestamp=timestamp if timestamp != 0 else None
+            vectors=vectors,
+            external_ids=external_ids,
+            timestamp=timestamp if timestamp != 0 else None,
         )
 
         docs = {}
@@ -610,7 +614,10 @@ class TileDB(VectorStore):
             docs["metadata"] = metadata_attr
 
         docs_array = tiledb.open(
-            self.docs_array_uri, "w", timestamp=timestamp if timestamp != 0 else None, config=self.config
+            self.docs_array_uri,
+            "w",
+            timestamp=timestamp if timestamp != 0 else None,
+            config=self.config,
         )
         docs_array[external_ids] = docs
         docs_array.close()
