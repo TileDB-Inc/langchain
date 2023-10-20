@@ -86,7 +86,7 @@ jobs:
 
       - name: Run TileDB tests
         run: |
-          poetry run pip install tiledb-vector-search
+          poetry run pip install tiledb-vector-search vcrpy
           poetry run pytest --disable-socket --allow-unix-socket tests/integration_tests/vectorstores/test_tiledb.py
 
       - name: Ensure the tests did not create any additional files

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pickle
 import random
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
 import numpy as np
 
@@ -15,7 +15,7 @@ from langchain.vectorstores.utils import maximal_marginal_relevance
 INDEX_METRICS = frozenset(["euclidean"])
 DEFAULT_METRIC = "euclidean"
 DOCUMENTS_ARRAY_NAME = "documents"
-VECTOR_ARRAY_NAME = "vectors"
+VECTOR_INDEX_NAME = "vectors"
 MAX_UINT64 = np.iinfo(np.dtype("uint64")).max
 MAX_FLOAT_32 = np.finfo(np.dtype("float32")).max
 
@@ -43,23 +43,58 @@ class TileDB(VectorStore):
         .. code-block:: python
 
             from langchain import TileDB
-            db = TileDB(embedding_function, index, metric, docs_array_uri)
+            embeddings = OpenAIEmbeddings()
+            db = TileDB(embeddings, index_uri, metric)
 
     """
 
     def __init__(
         self,
         embedding: Embeddings,
-        index: Any,
+        index_uri: str,
         metric: str,
-        docs_array_uri: str,
+        vector_index_uri: str = None,
+        docs_array_uri: str = None,
+        config: Optional[Mapping[str, Any]] = None,
+        timestamp=None,
+        **kwargs,
     ):
         """Initialize with necessary components."""
         self.embedding = embedding
         self.embedding_function = embedding.embed_query
-        self.index = index
+        self.index_uri = index_uri
         self.metric = metric
-        self.docs_array_uri = docs_array_uri
+        self.config = config
+        self.vector_index_uri = (
+            vector_index_uri
+            if vector_index_uri is not None
+            else f"{self.index_uri}/{VECTOR_INDEX_NAME}"
+        )
+        self.docs_array_uri = (
+            docs_array_uri
+            if docs_array_uri is not None
+            else f"{self.index_uri}/{DOCUMENTS_ARRAY_NAME}"
+        )
+
+        tiledb_vs, tiledb = dependable_tiledb_import()
+        group = tiledb.Group(self.vector_index_uri, "r", ctx=tiledb.Ctx(config))
+        self.index_type = group.meta.get("index_type")
+        group.close()
+        self.timestamp = timestamp
+        if self.index_type == "FLAT":
+            self.vector_index = tiledb_vs.flat_index.FlatIndex(
+                uri=self.vector_index_uri,
+                config=self.config,
+                timestamp=self.timestamp,
+                **kwargs,
+            )
+        elif self.index_type == "IVF_FLAT":
+            self.vector_index = tiledb_vs.ivf_flat_index.IVFFlatIndex(
+                uri=self.vector_index_uri,
+                config=self.config,
+                timestamp=self.timestamp,
+                **kwargs,
+            )
 
     @property
     def embeddings(self) -> Optional[Embeddings]:
@@ -72,7 +107,7 @@ class TileDB(VectorStore):
         scores: List[float],
         k: int = 4,
         filter: Optional[Dict[str, Any]] = None,
-        **kwargs: Any,
+        score_threshold: float = None,
     ) -> List[Tuple[Document, float]]:
         """Turns TileDB results into a list of documents and scores.
 
@@ -81,15 +116,15 @@ class TileDB(VectorStore):
             scores: List of distances of the documents in the index.
             k: Number of Documents to return. Defaults to 4.
             filter (Optional[Dict[str, Any]]): Filter by metadata. Defaults to None.
-            **kwargs: kwargs to be passed to similarity search. Can include:
-                score_threshold: Optional, a floating point value between 0 to 1 to
-                    filter the resulting set of retrieved docs
+            score_threshold: Optional, a floating point value to filter the resulting set of retrieved docs
         Returns:
             List of Documents and scores.
         """
         tiledb_vs, tiledb = dependable_tiledb_import()
         docs = []
-        docs_array = tiledb.open(self.docs_array_uri, "r")
+        docs_array = tiledb.open(
+            self.docs_array_uri, "r", timestamp=self.timestamp, config=self.config
+        )
         for idx, score in zip(ids, scores):
             if idx == 0 and score == 0:
                 continue
@@ -118,7 +153,6 @@ class TileDB(VectorStore):
             else:
                 docs.append((result_doc, score))
         docs_array.close()
-        score_threshold = kwargs.get("score_threshold")
         if score_threshold is not None:
             docs = [(doc, score) for doc, score in docs if score <= score_threshold]
         return docs[:k]
@@ -140,19 +174,24 @@ class TileDB(VectorStore):
             fetch_k: (Optional[int]) Number of Documents to fetch before filtering.
                       Defaults to 20.
             **kwargs: kwargs to be passed to similarity search. Can include:
-                score_threshold: Optional, a floating point value between 0 to 1 to
-                    filter the resulting set of retrieved docs
+                nprobe: Optional, number of partitions to check if using IVF_FLAT index
+                score_threshold: Optional, a floating point value to filter the resulting set of retrieved docs
 
         Returns:
-            List of documents most similar to the query text and L2 distance
+            List of documents most similar to the query text and distance
             in float for each. Lower score represents more similarity.
         """
-        d, i = self.index.query(
+        if "score_threshold" in kwargs:
+            score_threshold = kwargs.pop("score_threshold")
+        else:
+            score_threshold = None
+        d, i = self.vector_index.query(
             np.array([np.array(embedding).astype(np.float32)]).astype(np.float32),
             k=k if filter is None else fetch_k,
+            **kwargs,
         )
         return self.process_index_results(
-            ids=i[0], scores=d[0], filter=filter, k=k, **kwargs
+            ids=i[0], scores=d[0], filter=filter, k=k, score_threshold=score_threshold
         )
 
     def similarity_search_with_score(
@@ -174,7 +213,7 @@ class TileDB(VectorStore):
 
         Returns:
             List of documents most similar to the query text with
-            L2 distance in float. Lower score represents more similarity.
+            Distance as float. Lower score represents more similarity.
         """
         embedding = self.embedding_function(query)
         docs = self.similarity_search_with_score_by_vector(
@@ -248,6 +287,7 @@ class TileDB(VectorStore):
         fetch_k: int = 20,
         lambda_mult: float = 0.5,
         filter: Optional[Dict[str, Any]] = None,
+        **kwargs: Any,
     ) -> List[Tuple[Document, float]]:
         """Return docs and their similarity scores selected using the maximal marginal
             relevance.
@@ -268,15 +308,21 @@ class TileDB(VectorStore):
             List of Documents and similarity scores selected by maximal marginal
                 relevance and score for each.
         """
-        scores, indices = self.index.query(
+        if "score_threshold" in kwargs:
+            score_threshold = kwargs.pop("score_threshold")
+        else:
+            score_threshold = None
+        scores, indices = self.vector_index.query(
             np.array([np.array(embedding).astype(np.float32)]).astype(np.float32),
             k=fetch_k if filter is None else fetch_k * 2,
+            **kwargs,
         )
         results = self.process_index_results(
             ids=indices[0],
             scores=scores[0],
             filter=filter,
             k=fetch_k if filter is None else fetch_k * 2,
+            score_threshold=score_threshold,
         )
         embeddings = [
             self.embedding.embed_documents([doc.page_content])[0] for doc, _ in results
@@ -319,7 +365,12 @@ class TileDB(VectorStore):
             List of Documents selected by maximal marginal relevance.
         """
         docs_and_scores = self.max_marginal_relevance_search_with_score_by_vector(
-            embedding, k=k, fetch_k=fetch_k, lambda_mult=lambda_mult, filter=filter
+            embedding,
+            k=k,
+            fetch_k=fetch_k,
+            lambda_mult=lambda_mult,
+            filter=filter,
+            **kwargs,
         )
         return [doc for doc, _ in docs_and_scores]
 
@@ -361,15 +412,76 @@ class TileDB(VectorStore):
         return docs
 
     @classmethod
+    def create(
+        cls,
+        index_uri: str,
+        index_type: str,
+        dimensions: int,
+        vector_type: np.dtype,
+        metadatas: bool = True,
+        config: Optional[Mapping[str, Any]] = None,
+    ):
+        tiledb_vs, tiledb = dependable_tiledb_import()
+        with tiledb.scope_ctx(ctx_or_config=config):
+            try:
+                tiledb.group_create(index_uri)
+            except tiledb.TileDBError as err:
+                raise err
+            group = tiledb.Group(index_uri, "w")
+            vector_index_uri = f"{group.uri}/{VECTOR_INDEX_NAME}"
+            docs_uri = f"{group.uri}/{DOCUMENTS_ARRAY_NAME}"
+            if index_type == "FLAT":
+                tiledb_vs.flat_index.create(
+                    uri=vector_index_uri,
+                    dimensions=dimensions,
+                    vector_type=vector_type,
+                    config=config,
+                )
+            elif index_type == "IVF_FLAT":
+                tiledb_vs.ivf_flat_index.create(
+                    uri=vector_index_uri,
+                    dimensions=dimensions,
+                    vector_type=vector_type,
+                    config=config,
+                )
+            group.add(vector_index_uri, name=VECTOR_INDEX_NAME)
+
+            dim = tiledb.Dim(
+                name="id",
+                domain=(0, MAX_UINT64 - 1),
+                dtype=np.dtype(np.uint64),
+            )
+            dom = tiledb.Domain(dim)
+
+            text_attr = tiledb.Attr(name="text", dtype=np.dtype("U1"), var=True)
+            attrs = [text_attr]
+            if metadatas:
+                metadata_attr = tiledb.Attr(name="metadata", dtype=np.uint8, var=True)
+                attrs.append(metadata_attr)
+            schema = tiledb.ArraySchema(
+                domain=dom,
+                sparse=True,
+                allows_duplicates=False,
+                attrs=attrs,
+            )
+            tiledb.Array.create(docs_uri, schema)
+            group.add(docs_uri, name=DOCUMENTS_ARRAY_NAME)
+            group.close()
+
+    @classmethod
     def __from(
         cls,
         texts: List[str],
         embeddings: List[List[float]],
         embedding: Embeddings,
+        index_uri: str,
         metadatas: Optional[List[dict]] = None,
         ids: Optional[List[str]] = None,
         metric: str = DEFAULT_METRIC,
-        array_uri: str = "/tmp/tiledb_array",
+        index_type: str = "FLAT",
+        config: Optional[Mapping[str, Any]] = None,
+        index_timestamp: int = None,
+        **kwargs: Any,
     ) -> TileDB:
         if metric not in INDEX_METRICS:
             raise ValueError(
@@ -379,76 +491,68 @@ class TileDB(VectorStore):
                 )
             )
         tiledb_vs, tiledb = dependable_tiledb_import()
-        if not embeddings:
-            raise ValueError("embeddings must be provided to build a TileDB index")
-
-        try:
-            tiledb.group_create(array_uri)
-        except tiledb.TileDBError as err:
-            raise err
-        group = tiledb.Group(array_uri, "w")
-        vector_array_uri = f"{group.uri}/{VECTOR_ARRAY_NAME}"
-        docs_uri = f"{group.uri}/{DOCUMENTS_ARRAY_NAME}"
-        if ids is None:
-            ids = [str(random.randint(0, MAX_UINT64 - 1)) for _ in texts]
-        external_ids = np.array(ids).astype(np.uint64)
-
         input_vectors = np.array(embeddings).astype(np.float32)
-        index = tiledb_vs.ingestion.ingest(
-            index_type="IVF_FLAT",
-            index_uri=vector_array_uri,
-            input_vectors=input_vectors,
-            external_ids=external_ids,
-            partitions=1,
+        cls.create(
+            index_uri=index_uri,
+            index_type=index_type,
+            dimensions=input_vectors.shape[1],
+            vector_type=input_vectors.dtype,
+            metadatas=metadatas is not None,
+            config=config,
         )
-        group.add(vector_array_uri, name=VECTOR_ARRAY_NAME)
+        with tiledb.scope_ctx(ctx_or_config=config):
+            if not embeddings:
+                raise ValueError("embeddings must be provided to build a TileDB index")
 
-        dim = tiledb.Dim(
-            name="id",
-            domain=(0, MAX_UINT64 - 1),
-            dtype=np.dtype(np.uint64),
+            vector_index_uri = f"{index_uri}/{VECTOR_INDEX_NAME}"
+            docs_uri = f"{index_uri}/{DOCUMENTS_ARRAY_NAME}"
+            if ids is None:
+                ids = [str(random.randint(0, MAX_UINT64 - 1)) for _ in texts]
+            external_ids = np.array(ids).astype(np.uint64)
+
+            tiledb_vs.ingestion.ingest(
+                index_type=index_type,
+                index_uri=vector_index_uri,
+                input_vectors=input_vectors,
+                external_ids=external_ids,
+                index_timestamp=index_timestamp,
+                config=config,
+                **kwargs,
+            )
+            with tiledb.open(docs_uri, "w") as A:
+                if external_ids is None:
+                    external_ids = np.zeros(len(texts), dtype=np.uint64)
+                    for i in range(len(texts)):
+                        external_ids[i] = i
+                data = {}
+                data["text"] = np.array(texts)
+                if metadatas is not None:
+                    metadata_attr = np.empty([len(metadatas)], dtype=object)
+                    i = 0
+                    for metadata in metadatas:
+                        metadata_attr[i] = np.frombuffer(
+                            pickle.dumps(metadata), dtype=np.uint8
+                        )
+                        i += 1
+                    data["metadata"] = metadata_attr
+
+                A[external_ids] = data
+        return cls(
+            embedding=embedding,
+            index_uri=index_uri,
+            metric=metric,
+            config=config,
+            **kwargs,
         )
-        dom = tiledb.Domain(dim)
 
-        text_attr = tiledb.Attr(name="text", dtype=np.dtype("U1"), var=True)
-        attrs = [text_attr]
-        if metadatas is not None:
-            metadata_attr = tiledb.Attr(name="metadata", dtype=np.uint8, var=True)
-            attrs.append(metadata_attr)
-        schema = tiledb.ArraySchema(
-            domain=dom,
-            sparse=True,
-            allows_duplicates=False,
-            attrs=attrs,
-        )
-        tiledb.Array.create(docs_uri, schema)
-        with tiledb.open(docs_uri, "w") as A:
-            if external_ids is None:
-                external_ids = np.zeros(len(texts), dtype=np.uint64)
-                for i in range(len(texts)):
-                    external_ids[i] = i
-            data = {}
-            data["text"] = np.array(texts)
-            if metadatas is not None:
-                metadata_attr = np.empty([len(metadatas)], dtype=object)
-                i = 0
-                for metadata in metadatas:
-                    metadata_attr[i] = np.frombuffer(
-                        pickle.dumps(metadata), dtype=np.uint8
-                    )
-                    i += 1
-                data["metadata"] = metadata_attr
-
-            A[external_ids] = data
-        group.add(docs_uri, name=DOCUMENTS_ARRAY_NAME)
-        group.close()
-        return cls(embedding, index, metric, docs_uri)
-
-    def delete(self, ids: Optional[List[str]] = None, **kwargs: Any) -> Optional[bool]:
+    def delete(
+        self, ids: Optional[List[str]] = None, timestamp: int = None, **kwargs: Any
+    ) -> Optional[bool]:
         """Delete by vector ID or other criteria.
 
         Args:
             ids: List of ids to delete.
+            timestamp: Optional timestamp to delete with.
             **kwargs: Other keyword arguments that subclasses might use.
 
         Returns:
@@ -457,7 +561,7 @@ class TileDB(VectorStore):
         """
 
         external_ids = np.array(ids).astype(np.uint64)
-        self.index.delete_batch(external_ids=external_ids)
+        self.vector_index.delete_batch(external_ids=external_ids, timestamp=timestamp)
         return True
 
     def add_texts(
@@ -465,6 +569,7 @@ class TileDB(VectorStore):
         texts: Iterable[str],
         metadatas: Optional[List[dict]] = None,
         ids: Optional[List[str]] = None,
+        timestamp: int = None,
         **kwargs: Any,
     ) -> List[str]:
         """Run more texts through the embeddings and add to the vectorstore.
@@ -472,6 +577,8 @@ class TileDB(VectorStore):
         Args:
             texts: Iterable of strings to add to the vectorstore.
             metadatas: Optional list of metadatas associated with the texts.
+            ids: Optional ids of each text object.
+            timestamp: Optional timestamp to write new texts with.
             kwargs: vectorstore specific parameters
 
         Returns:
@@ -486,7 +593,9 @@ class TileDB(VectorStore):
         vectors = np.empty((len(embeddings)), dtype="O")
         for i in range(len(embeddings)):
             vectors[i] = np.array(embeddings[i], dtype=np.float32)
-        self.index.update_batch(vectors=vectors, external_ids=external_ids)
+        self.vector_index.update_batch(
+            vectors=vectors, external_ids=external_ids, timestamp=timestamp
+        )
 
         docs = {}
         docs["text"] = np.array(texts)
@@ -498,7 +607,9 @@ class TileDB(VectorStore):
                 i += 1
             docs["metadata"] = metadata_attr
 
-        docs_array = tiledb.open(self.docs_array_uri, "w")
+        docs_array = tiledb.open(
+            self.docs_array_uri, "w", timestamp=timestamp, config=self.config
+        )
         docs_array[external_ids] = docs
         docs_array.close()
         return ids
@@ -511,7 +622,10 @@ class TileDB(VectorStore):
         metadatas: Optional[List[dict]] = None,
         ids: Optional[List[str]] = None,
         metric: str = DEFAULT_METRIC,
-        array_uri: str = "/tmp/tiledb_array",
+        index_uri: str = "/tmp/tiledb_array",
+        index_type: str = "FLAT",
+        config: Optional[Mapping[str, Any]] = None,
+        index_timestamp: int = None,
         **kwargs: Any,
     ) -> TileDB:
         """Construct a TileDB index from raw documents.
@@ -520,8 +634,12 @@ class TileDB(VectorStore):
             texts: List of documents to index.
             embedding: Embedding function to use.
             metadatas: List of metadata dictionaries to associate with documents.
+            ids: Optional ids of each text object.
             metric: Metric to use for indexing. Defaults to "euclidean".
-            array_uri: The URI to write the TileDB arrays
+            index_uri: The URI to write the TileDB arrays
+            index_type: Optional,  Vector index type ("FLAT", IVF_FLAT")
+            config: Optional, TileDB config
+            index_timestamp: Optional, timestamp to write new texts with.
 
         Example:
             .. code-block:: python
@@ -534,7 +652,17 @@ class TileDB(VectorStore):
         embeddings = []
         embeddings = embedding.embed_documents(texts)
         return cls.__from(
-            texts, embeddings, embedding, metadatas, ids, metric, array_uri
+            texts=texts,
+            embeddings=embeddings,
+            embedding=embedding,
+            metadatas=metadatas,
+            ids=ids,
+            metric=metric,
+            index_uri=index_uri,
+            index_type=index_type,
+            config=config,
+            index_timestamp=index_timestamp,
+            **kwargs,
         )
 
     @classmethod
@@ -542,10 +670,13 @@ class TileDB(VectorStore):
         cls,
         text_embeddings: List[Tuple[str, List[float]]],
         embedding: Embeddings,
+        index_uri: str,
         metadatas: Optional[List[dict]] = None,
         ids: Optional[List[str]] = None,
         metric: str = DEFAULT_METRIC,
-        array_uri: str = "/tmp/tiledb_array",
+        index_type: str = "FLAT",
+        config: Optional[Mapping[str, Any]] = None,
+        index_timestamp: int = None,
         **kwargs: Any,
     ) -> TileDB:
         """Construct TileDB index from embeddings.
@@ -553,9 +684,12 @@ class TileDB(VectorStore):
         Args:
             text_embeddings: List of tuples of (text, embedding)
             embedding: Embedding function to use.
+            index_uri: The URI to write the TileDB arrays
             metadatas: List of metadata dictionaries to associate with documents.
-            metric: Metric to use for indexing. Defaults to "euclidean".
-            array_uri: The URI to write the TileDB arrays
+            metric: Optional, Metric to use for indexing. Defaults to "euclidean".
+            index_type: Optional, Vector index type ("FLAT", IVF_FLAT")
+            config: Optional, TileDB config
+            index_timestamp: Optional, timestamp to write new texts with.
 
         Example:
             .. code-block:: python
@@ -571,30 +705,46 @@ class TileDB(VectorStore):
         embeddings = [t[1] for t in text_embeddings]
 
         return cls.__from(
-            texts, embeddings, embedding, metadatas, ids, metric, array_uri
+            texts=texts,
+            embeddings=embeddings,
+            embedding=embedding,
+            metadatas=metadatas,
+            ids=ids,
+            metric=metric,
+            index_uri=index_uri,
+            index_type=index_type,
+            config=config,
+            index_timestamp=index_timestamp,
+            **kwargs,
         )
 
     @classmethod
     def load(
         cls,
-        array_uri: str,
-        embeddings: Embeddings,
+        index_uri: str,
+        embedding: Embeddings,
+        metric: str = DEFAULT_METRIC,
+        config: Optional[Mapping[str, Any]] = None,
+        timestamp=None,
+        **kwargs: Any,
     ) -> TileDB:
         """Load a TileDB index from a URI.
 
         Args:
-            array_uri: The URI of the TileDB array.
-            embeddings: Embeddings to use when generating queries.
+            index_uri: The URI of the TileDB vector index.
+            embedding: Embeddings to use when generating queries.
+            metric: Optional, Metric to use for indexing. Defaults to "euclidean".
+            config: Optional, TileDB config
+            timestamp: Optional, timestamp to use for opening the arrays.
         """
-        tiledb_vs, tiledb = dependable_tiledb_import()
+        return cls(
+            embedding=embedding,
+            index_uri=index_uri,
+            metric=metric,
+            config=config,
+            timestamp=timestamp,
+            **kwargs,
+        )
 
-        group = tiledb.Group(array_uri)
-        vector_array_uri = group[VECTOR_ARRAY_NAME].uri
-        documents_array_uri = group[DOCUMENTS_ARRAY_NAME].uri
-
-        index = tiledb_vs.ivf_flat_index.IVFFlatIndex(uri=vector_array_uri)
-
-        return cls(embeddings, index, DEFAULT_METRIC, documents_array_uri)
-
-    def consolidate_updates(self) -> None:
-        self.index = self.index.consolidate_updates()
+    def consolidate_updates(self, **kwargs: Any) -> None:
+        self.vector_index = self.vector_index.consolidate_updates(**kwargs)
