@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import pickle
 import random
+import sys
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
 import numpy as np
@@ -18,6 +19,7 @@ DOCUMENTS_ARRAY_NAME = "documents"
 VECTOR_INDEX_NAME = "vectors"
 MAX_UINT64 = np.iinfo(np.dtype("uint64")).max
 MAX_FLOAT_32 = np.finfo(np.dtype("float32")).max
+MAX_FLOAT = sys.float_info.max
 
 
 def dependable_tiledb_import() -> Any:
@@ -107,7 +109,7 @@ class TileDB(VectorStore):
         scores: List[float],
         k: int = 4,
         filter: Optional[Dict[str, Any]] = None,
-        score_threshold: float = MAX_FLOAT_32,
+        score_threshold: float = MAX_FLOAT,
     ) -> List[Tuple[Document, float]]:
         """Turns TileDB results into a list of documents and scores.
 
@@ -185,7 +187,7 @@ class TileDB(VectorStore):
         if "score_threshold" in kwargs:
             score_threshold = kwargs.pop("score_threshold")
         else:
-            score_threshold = MAX_FLOAT_32
+            score_threshold = MAX_FLOAT
         d, i = self.vector_index.query(
             np.array([np.array(embedding).astype(np.float32)]).astype(np.float32),
             k=k if filter is None else fetch_k,
@@ -312,7 +314,7 @@ class TileDB(VectorStore):
         if "score_threshold" in kwargs:
             score_threshold = kwargs.pop("score_threshold")
         else:
-            score_threshold = MAX_FLOAT_32
+            score_threshold = MAX_FLOAT
         scores, indices = self.vector_index.query(
             np.array([np.array(embedding).astype(np.float32)]).astype(np.float32),
             k=fetch_k if filter is None else fetch_k * 2,
