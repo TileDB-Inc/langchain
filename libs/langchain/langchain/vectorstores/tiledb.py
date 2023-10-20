@@ -53,10 +53,10 @@ class TileDB(VectorStore):
         embedding: Embeddings,
         index_uri: str,
         metric: str,
-        vector_index_uri: str = None,
-        docs_array_uri: str = None,
+        vector_index_uri: str = "",
+        docs_array_uri: str = "",
         config: Optional[Mapping[str, Any]] = None,
-        timestamp=None,
+        timestamp: int = 0,
         **kwargs,
     ):
         """Initialize with necessary components."""
@@ -67,12 +67,12 @@ class TileDB(VectorStore):
         self.config = config
         self.vector_index_uri = (
             vector_index_uri
-            if vector_index_uri is not None
+            if vector_index_uri == ""
             else f"{self.index_uri}/{VECTOR_INDEX_NAME}"
         )
         self.docs_array_uri = (
             docs_array_uri
-            if docs_array_uri is not None
+            if docs_array_uri == ""
             else f"{self.index_uri}/{DOCUMENTS_ARRAY_NAME}"
         )
 
@@ -107,7 +107,7 @@ class TileDB(VectorStore):
         scores: List[float],
         k: int = 4,
         filter: Optional[Dict[str, Any]] = None,
-        score_threshold: float = None,
+        score_threshold: float = -1.0,
     ) -> List[Tuple[Document, float]]:
         """Turns TileDB results into a list of documents and scores.
 
@@ -154,7 +154,7 @@ class TileDB(VectorStore):
             else:
                 docs.append((result_doc, score))
         docs_array.close()
-        if score_threshold is not None:
+        if score_threshold > 0:
             docs = [(doc, score) for doc, score in docs if score <= score_threshold]
         return docs[:k]
 
@@ -422,7 +422,7 @@ class TileDB(VectorStore):
         vector_type: np.dtype,
         metadatas: bool = True,
         config: Optional[Mapping[str, Any]] = None,
-    ):
+    ) -> None:
         tiledb_vs, tiledb = dependable_tiledb_import()
         with tiledb.scope_ctx(ctx_or_config=config):
             try:
@@ -482,7 +482,7 @@ class TileDB(VectorStore):
         metric: str = DEFAULT_METRIC,
         index_type: str = "FLAT",
         config: Optional[Mapping[str, Any]] = None,
-        index_timestamp: int = None,
+        index_timestamp: int = 0,
         **kwargs: Any,
     ) -> TileDB:
         if metric not in INDEX_METRICS:
@@ -517,7 +517,7 @@ class TileDB(VectorStore):
                 index_uri=vector_index_uri,
                 input_vectors=input_vectors,
                 external_ids=external_ids,
-                index_timestamp=index_timestamp,
+                index_timestamp=index_timestamp if index_timestamp != 0 else None,
                 config=config,
                 **kwargs,
             )
@@ -548,7 +548,7 @@ class TileDB(VectorStore):
         )
 
     def delete(
-        self, ids: Optional[List[str]] = None, timestamp: int = None, **kwargs: Any
+        self, ids: Optional[List[str]] = None, timestamp: int = 0, **kwargs: Any
     ) -> Optional[bool]:
         """Delete by vector ID or other criteria.
 
@@ -563,7 +563,7 @@ class TileDB(VectorStore):
         """
 
         external_ids = np.array(ids).astype(np.uint64)
-        self.vector_index.delete_batch(external_ids=external_ids, timestamp=timestamp)
+        self.vector_index.delete_batch(external_ids=external_ids, timestamp=timestamp if timestamp != 0 else None)
         return True
 
     def add_texts(
@@ -571,7 +571,7 @@ class TileDB(VectorStore):
         texts: Iterable[str],
         metadatas: Optional[List[dict]] = None,
         ids: Optional[List[str]] = None,
-        timestamp: int = None,
+        timestamp: int = 0,
         **kwargs: Any,
     ) -> List[str]:
         """Run more texts through the embeddings and add to the vectorstore.
@@ -596,7 +596,7 @@ class TileDB(VectorStore):
         for i in range(len(embeddings)):
             vectors[i] = np.array(embeddings[i], dtype=np.float32)
         self.vector_index.update_batch(
-            vectors=vectors, external_ids=external_ids, timestamp=timestamp
+            vectors=vectors, external_ids=external_ids, timestamp=timestamp if timestamp != 0 else None
         )
 
         docs = {}
@@ -610,7 +610,7 @@ class TileDB(VectorStore):
             docs["metadata"] = metadata_attr
 
         docs_array = tiledb.open(
-            self.docs_array_uri, "w", timestamp=timestamp, config=self.config
+            self.docs_array_uri, "w", timestamp=timestamp if timestamp != 0 else None, config=self.config
         )
         docs_array[external_ids] = docs
         docs_array.close()
@@ -627,7 +627,7 @@ class TileDB(VectorStore):
         index_uri: str = "/tmp/tiledb_array",
         index_type: str = "FLAT",
         config: Optional[Mapping[str, Any]] = None,
-        index_timestamp: int = None,
+        index_timestamp: int = 0,
         **kwargs: Any,
     ) -> TileDB:
         """Construct a TileDB index from raw documents.
@@ -678,7 +678,7 @@ class TileDB(VectorStore):
         metric: str = DEFAULT_METRIC,
         index_type: str = "FLAT",
         config: Optional[Mapping[str, Any]] = None,
-        index_timestamp: int = None,
+        index_timestamp: int = 0,
         **kwargs: Any,
     ) -> TileDB:
         """Construct TileDB index from embeddings.
@@ -727,7 +727,7 @@ class TileDB(VectorStore):
         embedding: Embeddings,
         metric: str = DEFAULT_METRIC,
         config: Optional[Mapping[str, Any]] = None,
-        timestamp=None,
+        timestamp: int = 0,
         **kwargs: Any,
     ) -> TileDB:
         """Load a TileDB index from a URI.
