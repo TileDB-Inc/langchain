@@ -57,7 +57,7 @@ class TileDB(VectorStore):
         docs_array_uri: str = "",
         config: Optional[Mapping[str, Any]] = None,
         timestamp: int = 0,
-        **kwargs,
+        **kwargs: Any,
     ):
         """Initialize with necessary components."""
         self.embedding = embedding
