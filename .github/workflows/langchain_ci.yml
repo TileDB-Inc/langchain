@@ -87,7 +87,7 @@ jobs:
       - name: Run TileDB tests
         run: |
           sudo apt install libopenblas-dev
-          git checkout https://github.com/TileDB-Inc/TileDB-Vector-Search.git
+          git clone https://github.com/TileDB-Inc/TileDB-Vector-Search.git
           cd TileDB-Vector-Search/apis/python
           pip install .
           poetry run pip install vcrpy
