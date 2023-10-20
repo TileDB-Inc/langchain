@@ -90,6 +90,7 @@ jobs:
           git clone https://github.com/TileDB-Inc/TileDB-Vector-Search.git
           cd TileDB-Vector-Search/apis/python
           pip install .
+          cd ../../../
           poetry run pip install vcrpy
           poetry run pytest --disable-socket --allow-unix-socket tests/integration_tests/vectorstores/test_tiledb.py
 
