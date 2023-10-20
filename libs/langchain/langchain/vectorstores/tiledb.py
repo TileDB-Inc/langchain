@@ -56,7 +56,7 @@ class TileDB(VectorStore):
         vector_index_uri: str = "",
         docs_array_uri: str = "",
         config: Optional[Mapping[str, Any]] = None,
-        timestamp: int = 0,
+        timestamp: Any = None,
         **kwargs: Any,
     ):
         """Initialize with necessary components."""
@@ -67,17 +67,17 @@ class TileDB(VectorStore):
         self.config = config
         self.vector_index_uri = (
             vector_index_uri
-            if vector_index_uri == ""
+            if vector_index_uri != ""
             else f"{self.index_uri}/{VECTOR_INDEX_NAME}"
         )
         self.docs_array_uri = (
             docs_array_uri
-            if docs_array_uri == ""
+            if docs_array_uri != ""
             else f"{self.index_uri}/{DOCUMENTS_ARRAY_NAME}"
         )
 
         tiledb_vs, tiledb = dependable_tiledb_import()
-        group = tiledb.Group(self.vector_index_uri, "r", ctx=tiledb.Ctx(config))
+        group = tiledb.Group(self.vector_index_uri, "r")
         self.index_type = group.meta.get("index_type")
         group.close()
         self.timestamp = timestamp
@@ -107,7 +107,7 @@ class TileDB(VectorStore):
         scores: List[float],
         k: int = 4,
         filter: Optional[Dict[str, Any]] = None,
-        score_threshold: float = -1.0,
+        score_threshold: float = MAX_FLOAT_32,
     ) -> List[Tuple[Document, float]]:
         """Turns TileDB results into a list of documents and scores.
 
@@ -154,8 +154,7 @@ class TileDB(VectorStore):
             else:
                 docs.append((result_doc, score))
         docs_array.close()
-        if score_threshold > 0:
-            docs = [(doc, score) for doc, score in docs if score <= score_threshold]
+        docs = [(doc, score) for doc, score in docs if score <= score_threshold]
         return docs[:k]
 
     def similarity_search_with_score_by_vector(
@@ -186,7 +185,7 @@ class TileDB(VectorStore):
         if "score_threshold" in kwargs:
             score_threshold = kwargs.pop("score_threshold")
         else:
-            score_threshold = None
+            score_threshold = MAX_FLOAT_32
         d, i = self.vector_index.query(
             np.array([np.array(embedding).astype(np.float32)]).astype(np.float32),
             k=k if filter is None else fetch_k,
@@ -313,7 +312,7 @@ class TileDB(VectorStore):
         if "score_threshold" in kwargs:
             score_threshold = kwargs.pop("score_threshold")
         else:
-            score_threshold = None
+            score_threshold = MAX_FLOAT_32
         scores, indices = self.vector_index.query(
             np.array([np.array(embedding).astype(np.float32)]).astype(np.float32),
             k=fetch_k if filter is None else fetch_k * 2,
@@ -734,7 +733,7 @@ class TileDB(VectorStore):
         embedding: Embeddings,
         metric: str = DEFAULT_METRIC,
         config: Optional[Mapping[str, Any]] = None,
-        timestamp: int = 0,
+        timestamp: Any = None,
         **kwargs: Any,
     ) -> TileDB:
         """Load a TileDB index from a URI.

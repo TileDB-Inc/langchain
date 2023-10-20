@@ -86,10 +86,10 @@ jobs:
 
       - name: Run TileDB tests
         run: |
-          poetry run pip install vcrpy
           sudo apt install libopenblas-dev
+          poetry install --with=test_integration
           poetry run pip install --no-cache-dir "tiledb-vector-search@git+https://github.com/TileDB-Inc/TileDB-Vector-Search#egg=tiledb-vector-search&subdirectory=apis/python"
-          poetry run pytest --disable-socket --allow-unix-socket tests/integration_tests/vectorstores/test_tiledb.py
+          poetry run pytest tests/integration_tests/vectorstores/test_tiledb.py
 
       - name: Ensure the tests did not create any additional files
         shell: bash
