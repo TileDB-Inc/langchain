@@ -36,11 +36,11 @@ def dependable_tiledb_import() -> Any:
     return tiledb_vs, tiledb
 
 
-def get_vector_index_uri(uri: str):
+def get_vector_index_uri(uri: str) -> str:
     return f"{uri}/{VECTOR_INDEX_NAME}"
 
 
-def get_documents_array_uri(uri: str):
+def get_documents_array_uri(uri: str) -> str:
     return f"{uri}/{DOCUMENTS_ARRAY_NAME}"
 
 
