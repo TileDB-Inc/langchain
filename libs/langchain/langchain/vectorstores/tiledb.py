@@ -36,6 +36,14 @@ def dependable_tiledb_import() -> Any:
     return tiledb_vs, tiledb
 
 
+def get_vector_index_uri(uri: str):
+    return f"{uri}/{VECTOR_INDEX_NAME}"
+
+
+def get_documents_array_uri(uri: str):
+    return f"{uri}/{DOCUMENTS_ARRAY_NAME}"
+
+
 class TileDB(VectorStore):
     """Wrapper around TileDB vector database.
 
@@ -70,12 +78,12 @@ class TileDB(VectorStore):
         self.vector_index_uri = (
             vector_index_uri
             if vector_index_uri != ""
-            else f"{self.index_uri}/{VECTOR_INDEX_NAME}"
+            else get_vector_index_uri(self.index_uri)
         )
         self.docs_array_uri = (
             docs_array_uri
             if docs_array_uri != ""
-            else f"{self.index_uri}/{DOCUMENTS_ARRAY_NAME}"
+            else get_documents_array_uri(self.index_uri)
         )
 
         tiledb_vs, tiledb = dependable_tiledb_import()
@@ -431,8 +439,8 @@ class TileDB(VectorStore):
             except tiledb.TileDBError as err:
                 raise err
             group = tiledb.Group(index_uri, "w")
-            vector_index_uri = f"{group.uri}/{VECTOR_INDEX_NAME}"
-            docs_uri = f"{group.uri}/{DOCUMENTS_ARRAY_NAME}"
+            vector_index_uri = get_vector_index_uri(group.uri)
+            docs_uri = get_documents_array_uri(group.uri)
             if index_type == "FLAT":
                 tiledb_vs.flat_index.create(
                     uri=vector_index_uri,
@@ -449,6 +457,9 @@ class TileDB(VectorStore):
                 )
             group.add(vector_index_uri, name=VECTOR_INDEX_NAME)
 
+            # Create TileDB array to store Documents
+            # TODO add a Document store API to tiledb-vector-search to allow storing
+            #  different types of objects and metadata in a more generic way.
             dim = tiledb.Dim(
                 name="id",
                 domain=(0, MAX_UINT64 - 1),
@@ -507,8 +518,8 @@ class TileDB(VectorStore):
             if not embeddings:
                 raise ValueError("embeddings must be provided to build a TileDB index")
 
-            vector_index_uri = f"{index_uri}/{VECTOR_INDEX_NAME}"
-            docs_uri = f"{index_uri}/{DOCUMENTS_ARRAY_NAME}"
+            vector_index_uri = get_vector_index_uri(index_uri)
+            docs_uri = get_documents_array_uri(index_uri)
             if ids is None:
                 ids = [str(random.randint(0, MAX_UINT64 - 1)) for _ in texts]
             external_ids = np.array(ids).astype(np.uint64)
