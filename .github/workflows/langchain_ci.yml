@@ -86,9 +86,7 @@ jobs:
 
       - name: Run TileDB tests
         run: |
-          sudo apt install libopenblas-dev
-          poetry install --with=test_integration
-          poetry run pip install --no-cache-dir "tiledb-vector-search@git+https://github.com/TileDB-Inc/TileDB-Vector-Search#egg=tiledb-vector-search&subdirectory=apis/python"
+          poetry install -E all
           poetry run pytest tests/integration_tests/vectorstores/test_tiledb.py
 
       - name: Ensure the tests did not create any additional files
