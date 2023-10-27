@@ -86,7 +86,8 @@ jobs:
 
       - name: Run TileDB tests
         run: |
-          poetry install -E all
+          poetry install --with=test_integration
+          poetry run pip install tiledb-vector-search
           poetry run pytest tests/integration_tests/vectorstores/test_tiledb.py
 
       - name: Ensure the tests did not create any additional files
