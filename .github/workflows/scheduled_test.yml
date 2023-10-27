@@ -53,20 +53,12 @@ jobs:
         run: |
           echo "Running scheduled tests, installing dependencies with poetry..."
           poetry install --with=test_integration
-          poetry run pip install google-cloud-aiplatform
-          poetry run pip install "boto3>=1.28.57"
+          poetry run pip install tiledb-vector-search
 
-      - name: Run tests
+      - name: Run TileDB tests
         shell: bash
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          AZURE_OPENAI_API_VERSION: ${{ secrets.AZURE_OPENAI_API_VERSION }}
-          AZURE_OPENAI_API_BASE: ${{ secrets.AZURE_OPENAI_API_BASE }}
-          AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
-          AZURE_OPENAI_DEPLOYMENT_NAME:  ${{ secrets.AZURE_OPENAI_DEPLOYMENT_NAME }}
         run: |
-          make scheduled_tests
+          poetry run pytest tests/integration_tests/vectorstores/test_tiledb.py
 
       - name: Ensure the tests did not create any additional files
         shell: bash
