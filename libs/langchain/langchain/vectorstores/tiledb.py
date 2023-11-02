@@ -36,6 +36,14 @@ def dependable_tiledb_import() -> Any:
     return tiledb_vs, tiledb
 
 
+def get_vector_index_uri_from_group(group: Any) -> str:
+    return group[VECTOR_INDEX_NAME].uri
+
+
+def get_documents_array_uri_from_group(group: Any) -> str:
+    return group[DOCUMENTS_ARRAY_NAME].uri
+
+
 def get_vector_index_uri(uri: str) -> str:
     return f"{uri}/{VECTOR_INDEX_NAME}"
 
@@ -63,6 +71,7 @@ class TileDB(VectorStore):
         embedding: Embeddings,
         index_uri: str,
         metric: str,
+        *,
         vector_index_uri: str = "",
         docs_array_uri: str = "",
         config: Optional[Mapping[str, Any]] = None,
@@ -75,46 +84,49 @@ class TileDB(VectorStore):
         self.index_uri = index_uri
         self.metric = metric
         self.config = config
-        self.vector_index_uri = (
-            vector_index_uri
-            if vector_index_uri != ""
-            else get_vector_index_uri(self.index_uri)
-        )
-        self.docs_array_uri = (
-            docs_array_uri
-            if docs_array_uri != ""
-            else get_documents_array_uri(self.index_uri)
-        )
 
         tiledb_vs, tiledb = dependable_tiledb_import()
-        group = tiledb.Group(self.vector_index_uri, "r")
-        self.index_type = group.meta.get("index_type")
-        group.close()
-        self.timestamp = timestamp
-        if self.index_type == "FLAT":
-            self.vector_index = tiledb_vs.flat_index.FlatIndex(
-                uri=self.vector_index_uri,
-                config=self.config,
-                timestamp=self.timestamp,
-                **kwargs,
+        with tiledb.scope_ctx(ctx_or_config=config):
+            index_group = tiledb.Group(self.index_uri, "r")
+            self.vector_index_uri = (
+                vector_index_uri
+                if vector_index_uri != ""
+                else get_vector_index_uri_from_group(index_group)
             )
-        elif self.index_type == "IVF_FLAT":
-            self.vector_index = tiledb_vs.ivf_flat_index.IVFFlatIndex(
-                uri=self.vector_index_uri,
-                config=self.config,
-                timestamp=self.timestamp,
-                **kwargs,
+            self.docs_array_uri = (
+                docs_array_uri
+                if docs_array_uri != ""
+                else get_documents_array_uri_from_group(index_group)
             )
+            index_group.close()
+            group = tiledb.Group(self.vector_index_uri, "r")
+            self.index_type = group.meta.get("index_type")
+            group.close()
+            self.timestamp = timestamp
+            if self.index_type == "FLAT":
+                self.vector_index = tiledb_vs.flat_index.FlatIndex(
+                    uri=self.vector_index_uri,
+                    config=self.config,
+                    timestamp=self.timestamp,
+                    **kwargs,
+                )
+            elif self.index_type == "IVF_FLAT":
+                self.vector_index = tiledb_vs.ivf_flat_index.IVFFlatIndex(
+                    uri=self.vector_index_uri,
+                    config=self.config,
+                    timestamp=self.timestamp,
+                    **kwargs,
+                )
 
     @property
     def embeddings(self) -> Optional[Embeddings]:
-        # TODO: Accept embedding object directly
-        return None
+        return self.embedding
 
     def process_index_results(
         self,
         ids: List[int],
         scores: List[float],
+        *,
         k: int = 4,
         filter: Optional[Dict[str, Any]] = None,
         score_threshold: float = MAX_FLOAT,
@@ -170,6 +182,7 @@ class TileDB(VectorStore):
     def similarity_search_with_score_by_vector(
         self,
         embedding: List[float],
+        *,
         k: int = 4,
         filter: Optional[Dict[str, Any]] = None,
         fetch_k: int = 20,
@@ -208,6 +221,7 @@ class TileDB(VectorStore):
     def similarity_search_with_score(
         self,
         query: str,
+        *,
         k: int = 4,
         filter: Optional[Dict[str, Any]] = None,
         fetch_k: int = 20,
@@ -229,7 +243,7 @@ class TileDB(VectorStore):
         embedding = self.embedding_function(query)
         docs = self.similarity_search_with_score_by_vector(
             embedding,
-            k,
+            k=k,
             filter=filter,
             fetch_k=fetch_k,
             **kwargs,
@@ -258,7 +272,7 @@ class TileDB(VectorStore):
         """
         docs_and_scores = self.similarity_search_with_score_by_vector(
             embedding,
-            k,
+            k=k,
             filter=filter,
             fetch_k=fetch_k,
             **kwargs,
@@ -286,7 +300,7 @@ class TileDB(VectorStore):
             List of Documents most similar to the query.
         """
         docs_and_scores = self.similarity_search_with_score(
-            query, k, filter=filter, fetch_k=fetch_k, **kwargs
+            query, k=k, filter=filter, fetch_k=fetch_k, **kwargs
         )
         return [doc for doc, _ in docs_and_scores]
 
@@ -429,6 +443,7 @@ class TileDB(VectorStore):
         index_type: str,
         dimensions: int,
         vector_type: np.dtype,
+        *,
         metadatas: bool = True,
         config: Optional[Mapping[str, Any]] = None,
     ) -> None:
@@ -489,6 +504,7 @@ class TileDB(VectorStore):
         embeddings: List[List[float]],
         embedding: Embeddings,
         index_uri: str,
+        *,
         metadatas: Optional[List[dict]] = None,
         ids: Optional[List[str]] = None,
         metric: str = DEFAULT_METRIC,
@@ -692,6 +708,7 @@ class TileDB(VectorStore):
         text_embeddings: List[Tuple[str, List[float]]],
         embedding: Embeddings,
         index_uri: str,
+        *,
         metadatas: Optional[List[dict]] = None,
         ids: Optional[List[str]] = None,
         metric: str = DEFAULT_METRIC,
@@ -744,6 +761,7 @@ class TileDB(VectorStore):
         cls,
         index_uri: str,
         embedding: Embeddings,
+        *,
         metric: str = DEFAULT_METRIC,
         config: Optional[Mapping[str, Any]] = None,
         timestamp: Any = None,
