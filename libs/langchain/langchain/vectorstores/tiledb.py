@@ -104,6 +104,7 @@ class TileDB(VectorStore):
             group.close()
             self.timestamp = timestamp
             if self.index_type == "FLAT":
+                print("[__init__] FLAT")
                 self.vector_index = tiledb_vs.flat_index.FlatIndex(
                     uri=self.vector_index_uri,
                     config=self.config,
@@ -111,6 +112,7 @@ class TileDB(VectorStore):
                     **kwargs,
                 )
             elif self.index_type == "IVF_FLAT":
+                print("[__init__] IVF_FLAT")
                 self.vector_index = tiledb_vs.ivf_flat_index.IVFFlatIndex(
                     uri=self.vector_index_uri,
                     config=self.config,
@@ -124,8 +126,8 @@ class TileDB(VectorStore):
 
     def process_index_results(
         self,
-        ids: List[int],
-        scores: List[float],
+        ids: List[np.uint64],
+        scores: List[np.float32],
         *,
         k: int = 4,
         filter: Optional[Dict[str, Any]] = None,
@@ -143,12 +145,20 @@ class TileDB(VectorStore):
         Returns:
             List of Documents and scores.
         """
+        print("[process_index_results] ids:", ids)
+        print("[process_index_results] scores:", scores)
         tiledb_vs, tiledb = dependable_tiledb_import()
         docs = []
         docs_array = tiledb.open(
             self.docs_array_uri, "r", timestamp=self.timestamp, config=self.config
         )
+        print("[process_index_results] docs_array:", docs_array)
+        print("[process_index_results] docs_array.dtype):", docs_array.dtype)
+        print("[process_index_results] MAX_UINT64:", MAX_UINT64)
+        print("[process_index_results] MAX_FLOAT_32:", MAX_FLOAT_32)
+        print("[process_index_results] sys.maxsize:", sys.maxsize)
         for idx, score in zip(ids, scores):
+            print("[process_index_results] idx:", idx, idx.dtype)
             if idx == 0 and score == 0:
                 continue
             if idx == MAX_UINT64 and score == MAX_FLOAT_32:
@@ -209,11 +219,18 @@ class TileDB(VectorStore):
             score_threshold = kwargs.pop("score_threshold")
         else:
             score_threshold = MAX_FLOAT
+        print('[similarity_search_with_score_by_vector] query:', 
+              np.array(embedding)
+        )
         d, i = self.vector_index.query(
             np.array([np.array(embedding).astype(np.float32)]).astype(np.float32),
             k=k if filter is None else fetch_k,
             **kwargs,
         )
+        print('[similarity_search_with_score_by_vector] scores:', d)
+        print('[similarity_search_with_score_by_vector] scores.dtype:', d.dtype)
+        print('[similarity_search_with_score_by_vector] ids:', i)
+        print('[similarity_search_with_score_by_vector] ids.dtype:', i.dtype)
         return self.process_index_results(
             ids=i[0], scores=d[0], filter=filter, k=k, score_threshold=score_threshold
         )
@@ -540,6 +557,13 @@ class TileDB(VectorStore):
                 ids = [str(random.randint(0, MAX_UINT64 - 1)) for _ in texts]
             external_ids = np.array(ids).astype(np.uint64)
 
+            print('[__from] index_type:', index_type)
+            print('[__from] index_uri:', index_uri)
+            print('[__from] input_vectors:', input_vectors)
+            print('[__from] external_ids:', external_ids)
+            print('[__from] index_timestamp:', index_timestamp)
+            print('[__from] config:', config)
+            print('[__from] kwargs:', kwargs)
             tiledb_vs.ingestion.ingest(
                 index_type=index_type,
                 index_uri=vector_index_uri,
@@ -625,6 +649,9 @@ class TileDB(VectorStore):
         vectors = np.empty((len(embeddings)), dtype="O")
         for i in range(len(embeddings)):
             vectors[i] = np.array(embeddings[i], dtype=np.float32)
+        print('[add_texts] vectors:', vectors)
+        print('[add_texts] external_ids:', external_ids)
+        print('[add_texts] timestamp:', timestamp)
         self.vector_index.update_batch(
             vectors=vectors,
             external_ids=external_ids,
