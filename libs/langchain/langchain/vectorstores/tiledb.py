@@ -153,6 +153,9 @@ class TileDB(VectorStore):
                 continue
             if idx == MAX_UINT64 and score == MAX_FLOAT_32:
                 continue
+            if idx > sys.maxsize:
+                # Avoid `OverflowError: Python int too large to convert to C long`
+                continue
             doc = docs_array[idx]
             if doc is None or len(doc["text"]) == 0:
                 raise ValueError(f"Could not find document for id {idx}, got {doc}")
